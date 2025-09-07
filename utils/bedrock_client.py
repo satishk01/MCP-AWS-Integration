@@ -35,8 +35,7 @@ class BedrockClient:
                      prompt: str, 
                      context: str = "", 
                      max_tokens: int = 4000,
-                     temperature: float = 0.7,
-                     top_p: float = 0.9) -> str:
+                     temperature: float = 0.7) -> str:
         """Generate text using Nova Pro model"""
         try:
             # Prepare the message content
@@ -47,12 +46,17 @@ class BedrockClient:
                 "messages": [
                     {
                         "role": "user",
-                        "content": content
+                        "content": [
+                            {
+                                "text": content
+                            }
+                        ]
                     }
                 ],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "top_p": top_p
+                "inferenceConfig": {
+                    "max_new_tokens": max_tokens,
+                    "temperature": temperature
+                }
             }
             
             # Call Bedrock
@@ -65,11 +69,14 @@ class BedrockClient:
             # Parse response
             response_body = json.loads(response['body'].read())
             
-            if 'content' in response_body and len(response_body['content']) > 0:
-                return response_body['content'][0]['text']
-            else:
-                logger.error("Unexpected response format from Nova Pro")
-                return "Error: Unexpected response format"
+            # Nova Pro response format
+            if 'output' in response_body and 'message' in response_body['output']:
+                message = response_body['output']['message']
+                if 'content' in message and len(message['content']) > 0:
+                    return message['content'][0]['text']
+            
+            logger.error(f"Unexpected response format from Nova Pro: {response_body}")
+            return "Error: Unexpected response format"
                 
         except ClientError as e:
             error_code = e.response['Error']['Code']
@@ -81,18 +88,31 @@ class BedrockClient:
             return f"Error generating response: {str(e)}"
     
     def generate_chat_response(self, 
-                              messages: List[Dict[str, str]], 
+                              messages: List[Dict[str, Any]], 
                               max_tokens: int = 4000,
-                              temperature: float = 0.7,
-                              top_p: float = 0.9) -> str:
+                              temperature: float = 0.7) -> str:
         """Generate chat response using Nova Pro model"""
         try:
+            # Convert messages to Nova Pro format
+            nova_messages = []
+            for msg in messages:
+                nova_msg = {
+                    "role": msg["role"],
+                    "content": [
+                        {
+                            "text": msg["content"]
+                        }
+                    ]
+                }
+                nova_messages.append(nova_msg)
+            
             # Prepare request body for Nova Pro
             request_body = {
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "top_p": top_p
+                "messages": nova_messages,
+                "inferenceConfig": {
+                    "max_new_tokens": max_tokens,
+                    "temperature": temperature
+                }
             }
             
             # Call Bedrock
@@ -105,11 +125,14 @@ class BedrockClient:
             # Parse response
             response_body = json.loads(response['body'].read())
             
-            if 'content' in response_body and len(response_body['content']) > 0:
-                return response_body['content'][0]['text']
-            else:
-                logger.error("Unexpected response format from Nova Pro")
-                return "Error: Unexpected response format"
+            # Nova Pro response format
+            if 'output' in response_body and 'message' in response_body['output']:
+                message = response_body['output']['message']
+                if 'content' in message and len(message['content']) > 0:
+                    return message['content'][0]['text']
+            
+            logger.error(f"Unexpected response format from Nova Pro: {response_body}")
+            return "Error: Unexpected response format"
                 
         except ClientError as e:
             error_code = e.response['Error']['Code']

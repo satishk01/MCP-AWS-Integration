@@ -61,38 +61,12 @@ class NovaProIntegration:
     """Handles Amazon Nova Pro model integration using Strands SDK"""
     
     def __init__(self):
-        self.bedrock_client = boto3.client('bedrock-runtime')
-        self.model_id = "amazon.nova-pro-v1:0"
+        from utils.bedrock_client import BedrockClient
+        self.bedrock_client = BedrockClient()
     
     def generate_response(self, prompt: str, context: str = "") -> str:
         """Generate response using Nova Pro model"""
-        try:
-            # Prepare the request body for Nova Pro
-            request_body = {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": f"{context}\n\n{prompt}" if context else prompt
-                    }
-                ],
-                "max_tokens": 4000,
-                "temperature": 0.7,
-                "top_p": 0.9
-            }
-            
-            # Call Bedrock
-            response = self.bedrock_client.invoke_model(
-                modelId=self.model_id,
-                body=json.dumps(request_body),
-                contentType="application/json"
-            )
-            
-            # Parse response
-            response_body = json.loads(response['body'].read())
-            return response_body['content'][0]['text']
-            
-        except Exception as e:
-            return f"Error generating response: {str(e)}"
+        return self.bedrock_client.generate_text(prompt, context)
 
 def main():
     st.title("🔬 AWS MCP Research & Documentation Assistant")

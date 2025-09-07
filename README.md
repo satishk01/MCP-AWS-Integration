@@ -155,6 +155,14 @@ The application uses two MCP servers:
 | `GITHUB_TOKEN` | GitHub personal access token | Required for repo analysis |
 | `STREAMLIT_SERVER_PORT` | Streamlit server port | `8501` |
 
+### Nova Pro Model Configuration
+
+The application uses Amazon Nova Pro with the following parameters:
+- **Model ID**: `amazon.nova-pro-v1:0`
+- **Max Tokens**: 4000 (configurable)
+- **Temperature**: 0.7 (configurable)
+- **Content Format**: Text-based messages with proper role structure
+
 ## 📖 Usage Guide
 
 ### 1. Repository Research
@@ -287,6 +295,20 @@ The MCP servers and Nova Pro model support analysis of:
    - Verify IAM permissions for Bedrock
    - Ensure Nova Pro model is available in your region
    - Check if model access is enabled in Bedrock console
+
+4. **Nova Pro API Errors**
+   ```bash
+   # Test Nova Pro model access
+   aws bedrock invoke-model \
+     --model-id amazon.nova-pro-v1:0 \
+     --body '{"messages":[{"role":"user","content":[{"text":"Hello"}]}],"inferenceConfig":{"max_new_tokens":100,"temperature":0.7}}' \
+     --cli-binary-format raw-in-base64-out \
+     --region us-west-2 \
+     output.json
+   ```
+   - Ensure you're using the correct message format with content arrays
+   - Use `max_new_tokens` instead of `max_tokens`
+   - Don't use unsupported parameters like `top_p`
 
 4. **GitHub Token Issues**
    - Verify token has repo access permissions
