@@ -90,7 +90,17 @@ def main():
         github_token = st.text_input("GitHub Token", type="password")
         
         st.markdown("---")
-        st.markdown("**MCP Servers Status**")
+        st.markdown("**Service Status**")
+        
+        # Test Nova Pro connection
+        if st.button("Test Nova Pro Connection"):
+            with st.spinner("Testing connection..."):
+                if nova_integration.bedrock_client.test_connection():
+                    st.success("✅ Nova Pro Connected")
+                    st.info(f"Using inference profile: {nova_integration.bedrock_client.model_id}")
+                else:
+                    st.error("❌ Nova Pro Connection Failed")
+        
         st.success("✅ Git Repo Research Server")
         st.success("✅ Code Doc Gen Server")
     

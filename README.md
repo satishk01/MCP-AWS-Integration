@@ -101,14 +101,17 @@ Create an IAM role with the following permissions for EC2 deployment:
                 "bedrock:InvokeModelWithResponseStream"
             ],
             "Resource": [
-                "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0"
+                "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0",
+                "arn:aws:bedrock:*::inference-profile/*"
             ]
         },
         {
             "Effect": "Allow",
             "Action": [
                 "bedrock:ListFoundationModels",
-                "bedrock:GetFoundationModel"
+                "bedrock:GetFoundationModel",
+                "bedrock:ListInferenceProfiles",
+                "bedrock:GetInferenceProfile"
             ],
             "Resource": "*"
         }
@@ -158,10 +161,12 @@ The application uses two MCP servers:
 ### Nova Pro Model Configuration
 
 The application uses Amazon Nova Pro with the following parameters:
-- **Model ID**: `amazon.nova-pro-v1:0`
+- **Inference Profile**: `us.amazon.nova-pro-v1:0` (cross-region profile)
 - **Max Tokens**: 4000 (configurable)
 - **Temperature**: 0.7 (configurable)
 - **Content Format**: Text-based messages with proper role structure
+
+**Important**: Nova Pro models require using inference profiles instead of direct model IDs. The application automatically detects and uses the appropriate inference profile.
 
 ## 📖 Usage Guide
 
@@ -296,19 +301,28 @@ The MCP servers and Nova Pro model support analysis of:
    - Ensure Nova Pro model is available in your region
    - Check if model access is enabled in Bedrock console
 
-4. **Nova Pro API Errors**
+4. **Nova Pro Inference Profile Issues**
    ```bash
-   # Test Nova Pro model access
-   aws bedrock invoke-model \
-     --model-id amazon.nova-pro-v1:0 \
+   # List available inference profiles
+   aws bedrock list-inference-profiles --region us-west-2
+   
+   # Test Nova Pro with inference profile
+   aws bedrock-runtime invoke-model \
+     --model-id us.amazon.nova-pro-v1:0 \
      --body '{"messages":[{"role":"user","content":[{"text":"Hello"}]}],"inferenceConfig":{"max_new_tokens":100,"temperature":0.7}}' \
      --cli-binary-format raw-in-base64-out \
      --region us-west-2 \
      output.json
    ```
+   - **Critical**: Use inference profile ID (e.g., `us.amazon.nova-pro-v1:0`) not direct model ID
    - Ensure you're using the correct message format with content arrays
    - Use `max_new_tokens` instead of `max_tokens`
    - Don't use unsupported parameters like `top_p`
+
+5. **Inference Profile Not Found**
+   - Check if Nova Pro is available in your region
+   - Verify model access is enabled in Bedrock console
+   - Try using cross-region inference profile: `us.amazon.nova-pro-v1:0`
 
 4. **GitHub Token Issues**
    - Verify token has repo access permissions

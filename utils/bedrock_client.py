@@ -16,13 +16,17 @@ class BedrockClient:
             if profile_name:
                 session = boto3.Session(profile_name=profile_name)
                 self.bedrock_runtime = session.client('bedrock-runtime', region_name=region_name)
+                self.bedrock_client = session.client('bedrock', region_name=region_name)
             else:
                 self.bedrock_runtime = boto3.client('bedrock-runtime', region_name=region_name)
+                self.bedrock_client = boto3.client('bedrock', region_name=region_name)
             
             self.region_name = region_name
-            self.model_id = "amazon.nova-pro-v1:0"
+            # Use inference profile for Nova Pro instead of direct model ID
+            self.model_id = self._get_nova_pro_inference_profile()
             
             logger.info(f"Initialized Bedrock client for region: {region_name}")
+            logger.info(f"Using Nova Pro inference profile: {self.model_id}")
             
         except NoCredentialsError:
             logger.error("AWS credentials not found. Please configure your credentials.")
@@ -30,6 +34,30 @@ class BedrockClient:
         except Exception as e:
             logger.error(f"Failed to initialize Bedrock client: {e}")
             raise
+    
+    def _get_nova_pro_inference_profile(self) -> str:
+        """Get the appropriate Nova Pro inference profile"""
+        try:
+            # Try to list inference profiles to find Nova Pro
+            response = self.bedrock_client.list_inference_profiles()
+            
+            for profile in response.get('inferenceProfileSummaries', []):
+                if 'nova-pro' in profile.get('inferenceProfileName', '').lower():
+                    logger.info(f"Found Nova Pro inference profile: {profile['inferenceProfileId']}")
+                    return profile['inferenceProfileId']
+            
+            # If no inference profile found, try the cross-region inference profile
+            # This is a common pattern for Nova models
+            cross_region_profile = f"us.amazon.nova-pro-v1:0"
+            logger.info(f"Using cross-region inference profile: {cross_region_profile}")
+            return cross_region_profile
+            
+        except Exception as e:
+            logger.warning(f"Could not retrieve inference profiles: {e}")
+            # Fallback to cross-region inference profile
+            cross_region_profile = f"us.amazon.nova-pro-v1:0"
+            logger.info(f"Using fallback cross-region inference profile: {cross_region_profile}")
+            return cross_region_profile
     
     def generate_text(self, 
                      prompt: str, 
@@ -198,3 +226,32 @@ class BedrockClient:
         """
         
         return self.generate_text(prompt, context)
+    
+    def list_available_inference_profiles(self) -> List[Dict[str, Any]]:
+        """List all available inference profiles"""
+        try:
+            response = self.bedrock_client.list_inference_profiles()
+            profiles = []
+            
+            for profile in response.get('inferenceProfileSummaries', []):
+                profiles.append({
+                    'id': profile.get('inferenceProfileId'),
+                    'name': profile.get('inferenceProfileName'),
+                    'description': profile.get('description', ''),
+                    'models': profile.get('models', [])
+                })
+            
+            return profiles
+            
+        except Exception as e:
+            logger.error(f"Error listing inference profiles: {e}")
+            return []
+    
+    def test_connection(self) -> bool:
+        """Test the connection to Nova Pro model"""
+        try:
+            test_response = self.generate_text("Hello, this is a test message.", max_tokens=50)
+            return not test_response.startswith("Error:")
+        except Exception as e:
+            logger.error(f"Connection test failed: {e}")
+            return False

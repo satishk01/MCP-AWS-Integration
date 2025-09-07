@@ -8,8 +8,8 @@ class Config:
     AWS_REGION = os.getenv('AWS_REGION', 'us-west-2')
     AWS_PROFILE = os.getenv('AWS_PROFILE', 'default')
     
-    # Bedrock Configuration
-    BEDROCK_MODEL_ID = "amazon.nova-pro-v1:0"
+    # Bedrock Configuration - Nova Pro requires inference profiles
+    BEDROCK_MODEL_ID = "us.amazon.nova-pro-v1:0"  # Cross-region inference profile
     
     # GitHub Configuration
     GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
