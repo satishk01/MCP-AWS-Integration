@@ -153,7 +153,7 @@ The application uses two MCP servers:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `AWS_REGION` | AWS region for Bedrock | `us-west-2` |
+| `AWS_REGION` | AWS region for Bedrock | `us-east-1` |
 | `AWS_PROFILE` | AWS profile name | `default` |
 | `GITHUB_TOKEN` | GitHub personal access token | Required for repo analysis |
 | `STREAMLIT_SERVER_PORT` | Streamlit server port | `8501` |
@@ -304,14 +304,14 @@ The MCP servers and Nova Pro model support analysis of:
 4. **Nova Pro Inference Profile Issues**
    ```bash
    # List available inference profiles
-   aws bedrock list-inference-profiles --region us-west-2
+   aws bedrock list-inference-profiles --region us-east-1
    
    # Test Nova Pro with inference profile
    aws bedrock-runtime invoke-model \
      --model-id us.amazon.nova-pro-v1:0 \
      --body '{"messages":[{"role":"user","content":[{"text":"Hello"}]}],"inferenceConfig":{"max_new_tokens":100,"temperature":0.7}}' \
      --cli-binary-format raw-in-base64-out \
-     --region us-west-2 \
+     --region us-east-1 \
      output.json
    ```
    - **Critical**: Use inference profile ID (e.g., `us.amazon.nova-pro-v1:0`) not direct model ID
@@ -319,7 +319,23 @@ The MCP servers and Nova Pro model support analysis of:
    - Use `max_new_tokens` instead of `max_tokens`
    - Don't use unsupported parameters like `top_p`
 
-5. **Inference Profile Not Found**
+5. **Access Denied Errors**
+   ```bash
+   # Check if you have model access
+   aws bedrock list-foundation-models --region us-east-1 | grep nova
+   
+   # Check inference profiles
+   aws bedrock list-inference-profiles --region us-east-1
+   
+   # Verify your identity
+   aws sts get-caller-identity
+   ```
+   - Ensure Nova Pro model access is enabled in Bedrock console
+   - Verify your IAM role/user has the correct permissions
+   - Check if you're using the correct AWS region
+   - Request model access in Bedrock console if needed
+
+6. **Inference Profile Not Found**
    - Check if Nova Pro is available in your region
    - Verify model access is enabled in Bedrock console
    - Try using cross-region inference profile: `us.amazon.nova-pro-v1:0`

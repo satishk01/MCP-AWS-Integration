@@ -60,9 +60,15 @@ class MCPServerManager:
 class NovaProIntegration:
     """Handles Amazon Nova Pro model integration using Strands SDK"""
     
-    def __init__(self):
+    def __init__(self, region_name: str = "us-east-1"):
         from utils.bedrock_client import BedrockClient
-        self.bedrock_client = BedrockClient()
+        from config import Config
+        
+        # Use region from config or parameter
+        region = os.getenv('AWS_REGION', region_name)
+        profile = os.getenv('AWS_PROFILE', 'default')
+        
+        self.bedrock_client = BedrockClient(region_name=region, profile_name=profile)
     
     def generate_response(self, prompt: str, context: str = "") -> str:
         """Generate response using Nova Pro model"""
@@ -82,7 +88,7 @@ def main():
         
         # AWS Configuration
         st.subheader("AWS Settings")
-        aws_region = st.text_input("AWS Region", value="us-west-2")
+        aws_region = st.text_input("AWS Region", value="us-east-1")
         aws_profile = st.text_input("AWS Profile", value="default")
         
         # GitHub Configuration
@@ -100,6 +106,12 @@ def main():
                     st.info(f"Using inference profile: {nova_integration.bedrock_client.model_id}")
                 else:
                     st.error("❌ Nova Pro Connection Failed")
+        
+        # Debug access issues
+        if st.button("Debug Access Issues"):
+            with st.spinner("Gathering debug information..."):
+                debug_info = nova_integration.bedrock_client.debug_access()
+                st.json(debug_info)
         
         st.success("✅ Git Repo Research Server")
         st.success("✅ Code Doc Gen Server")

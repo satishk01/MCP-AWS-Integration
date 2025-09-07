@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class BedrockClient:
     """Client for interacting with Amazon Bedrock and Nova Pro model"""
     
-    def __init__(self, region_name: str = "us-west-2", profile_name: Optional[str] = None):
+    def __init__(self, region_name: str = "us-east-1", profile_name: Optional[str] = None):
         """Initialize Bedrock client"""
         try:
             # Initialize boto3 session
@@ -37,27 +37,68 @@ class BedrockClient:
     
     def _get_nova_pro_inference_profile(self) -> str:
         """Get the appropriate Nova Pro inference profile"""
+        # List of possible inference profile formats to try
+        possible_profiles = [
+            f"us.amazon.nova-pro-v1:0",  # Cross-region profile
+            f"{self.region_name}.amazon.nova-pro-v1:0",  # Region-specific profile
+            "amazon.nova-pro-v1:0",  # Direct model ID (fallback)
+        ]
+        
         try:
             # Try to list inference profiles to find Nova Pro
             response = self.bedrock_client.list_inference_profiles()
             
             for profile in response.get('inferenceProfileSummaries', []):
-                if 'nova-pro' in profile.get('inferenceProfileName', '').lower():
-                    logger.info(f"Found Nova Pro inference profile: {profile['inferenceProfileId']}")
-                    return profile['inferenceProfileId']
+                profile_name = profile.get('inferenceProfileName', '').lower()
+                profile_id = profile.get('inferenceProfileId', '')
+                
+                if 'nova-pro' in profile_name or 'nova-pro' in profile_id.lower():
+                    logger.info(f"Found Nova Pro inference profile: {profile_id}")
+                    return profile_id
             
-            # If no inference profile found, try the cross-region inference profile
-            # This is a common pattern for Nova models
-            cross_region_profile = f"us.amazon.nova-pro-v1:0"
-            logger.info(f"Using cross-region inference profile: {cross_region_profile}")
-            return cross_region_profile
+            logger.warning("No Nova Pro inference profile found in list, trying known formats...")
             
         except Exception as e:
             logger.warning(f"Could not retrieve inference profiles: {e}")
-            # Fallback to cross-region inference profile
-            cross_region_profile = f"us.amazon.nova-pro-v1:0"
-            logger.info(f"Using fallback cross-region inference profile: {cross_region_profile}")
-            return cross_region_profile
+        
+        # Try each possible profile format
+        for profile_id in possible_profiles:
+            try:
+                # Test if this profile works by making a small request
+                test_body = {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"text": "test"}]
+                        }
+                    ],
+                    "inferenceConfig": {
+                        "max_new_tokens": 10,
+                        "temperature": 0.1
+                    }
+                }
+                
+                response = self.bedrock_runtime.invoke_model(
+                    modelId=profile_id,
+                    body=json.dumps(test_body),
+                    contentType="application/json"
+                )
+                
+                logger.info(f"Successfully validated inference profile: {profile_id}")
+                return profile_id
+                
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                logger.warning(f"Profile {profile_id} failed with {error_code}: {e.response['Error']['Message']}")
+                continue
+            except Exception as e:
+                logger.warning(f"Profile {profile_id} failed with error: {e}")
+                continue
+        
+        # If all else fails, return the cross-region profile
+        fallback_profile = "us.amazon.nova-pro-v1:0"
+        logger.error(f"All inference profiles failed, using fallback: {fallback_profile}")
+        return fallback_profile
     
     def generate_text(self, 
                      prompt: str, 
@@ -255,3 +296,45 @@ class BedrockClient:
         except Exception as e:
             logger.error(f"Connection test failed: {e}")
             return False
+    
+    def debug_access(self) -> Dict[str, Any]:
+        """Debug access issues and return diagnostic information"""
+        debug_info = {
+            "region": self.region_name,
+            "model_id": self.model_id,
+            "foundation_models": [],
+            "inference_profiles": [],
+            "identity": {},
+            "errors": []
+        }
+        
+        try:
+            # Get caller identity
+            sts_client = boto3.client('sts', region_name=self.region_name)
+            debug_info["identity"] = sts_client.get_caller_identity()
+        except Exception as e:
+            debug_info["errors"].append(f"STS Error: {str(e)}")
+        
+        try:
+            # List foundation models
+            models_response = self.bedrock_client.list_foundation_models()
+            nova_models = [
+                model for model in models_response.get('modelSummaries', [])
+                if 'nova' in model.get('modelName', '').lower()
+            ]
+            debug_info["foundation_models"] = nova_models
+        except Exception as e:
+            debug_info["errors"].append(f"Foundation Models Error: {str(e)}")
+        
+        try:
+            # List inference profiles
+            profiles_response = self.bedrock_client.list_inference_profiles()
+            nova_profiles = [
+                profile for profile in profiles_response.get('inferenceProfileSummaries', [])
+                if 'nova' in profile.get('inferenceProfileName', '').lower()
+            ]
+            debug_info["inference_profiles"] = nova_profiles
+        except Exception as e:
+            debug_info["errors"].append(f"Inference Profiles Error: {str(e)}")
+        
+        return debug_info

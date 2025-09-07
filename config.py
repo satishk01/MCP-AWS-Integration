@@ -5,7 +5,7 @@ class Config:
     """Configuration management for the application"""
     
     # AWS Configuration
-    AWS_REGION = os.getenv('AWS_REGION', 'us-west-2')
+    AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
     AWS_PROFILE = os.getenv('AWS_PROFILE', 'default')
     
     # Bedrock Configuration - Nova Pro requires inference profiles
