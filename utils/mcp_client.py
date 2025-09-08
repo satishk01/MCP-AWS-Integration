@@ -2,6 +2,8 @@ import json
 import subprocess
 import asyncio
 import os
+import concurrent.futures
+import threading
 from typing import Dict, Any, List
 import logging
 
@@ -132,42 +134,85 @@ class MCPClient:
 
 # Synchronous wrapper for Streamlit compatibility
 class SyncMCPClient:
-    """Synchronous wrapper for MCPClient"""
+    """Synchronous wrapper for MCPClient with proper event loop handling"""
     
     def __init__(self):
         self.client = MCPClient()
-        self.loop = None
     
-    def _get_loop(self):
-        """Get or create event loop"""
-        try:
-            return asyncio.get_event_loop()
-        except RuntimeError:
+    def _run_async(self, coro):
+        """Run an async coroutine safely with proper event loop handling"""
+        def run_in_thread():
+            """Run the coroutine in a separate thread with its own event loop"""
+            # Create a completely fresh event loop in this thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            return loop
+            try:
+                return loop.run_until_complete(coro)
+            except Exception as e:
+                logger.error(f"Error in async operation: {e}")
+                return None
+            finally:
+                try:
+                    # Clean up any remaining tasks
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                except:
+                    pass
+                finally:
+                    loop.close()
+        
+        try:
+            # Always run in a separate thread to avoid event loop conflicts
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_in_thread)
+                return future.result(timeout=30)  # 30 second timeout
+        except concurrent.futures.TimeoutError:
+            logger.error("Async operation timed out")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to run async operation: {e}")
+            return None
     
     def connect_server(self, server_name: str, command: str, args: List[str], env: Dict[str, str] = None) -> bool:
         """Synchronous server connection"""
-        loop = self._get_loop()
-        return loop.run_until_complete(self.client.connect_server(server_name, command, args, env))
+        try:
+            result = self._run_async(self.client.connect_server(server_name, command, args, env))
+            return result if result is not None else False
+        except Exception as e:
+            logger.error(f"Failed to connect server {server_name}: {e}")
+            return False
     
     def call_tool(self, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Synchronous tool call"""
-        loop = self._get_loop()
-        return loop.run_until_complete(self.client.call_tool(server_name, tool_name, arguments))
+        try:
+            result = self._run_async(self.client.call_tool(server_name, tool_name, arguments))
+            return result if result is not None else {"error": "Operation failed"}
+        except Exception as e:
+            logger.error(f"Failed to call tool {tool_name}: {e}")
+            return {"error": str(e)}
     
     def list_tools(self, server_name: str) -> List[Dict[str, Any]]:
         """Synchronous tool listing"""
-        loop = self._get_loop()
-        return loop.run_until_complete(self.client.list_tools(server_name))
+        try:
+            result = self._run_async(self.client.list_tools(server_name))
+            return result if result is not None else []
+        except Exception as e:
+            logger.error(f"Failed to list tools for {server_name}: {e}")
+            return []
     
     def disconnect_server(self, server_name: str):
         """Synchronous server disconnection"""
-        loop = self._get_loop()
-        loop.run_until_complete(self.client.disconnect_server(server_name))
+        try:
+            self._run_async(self.client.disconnect_server(server_name))
+        except Exception as e:
+            logger.error(f"Failed to disconnect server {server_name}: {e}")
     
     def disconnect_all(self):
         """Synchronous disconnect all"""
-        loop = self._get_loop()
-        loop.run_until_complete(self.client.disconnect_all())
+        try:
+            self._run_async(self.client.disconnect_all())
+        except Exception as e:
+            logger.error(f"Failed to disconnect all servers: {e}")
