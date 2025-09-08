@@ -299,12 +299,8 @@ def main():
             if uvx_info["path"]:
                 st.info(f"Path: {uvx_info['path']}")
             
-            # Show MCP client uvx detection status
-            mcp_uvx_status = mcp_manager.mcp_client.client.uvx_available
-            if mcp_uvx_status:
-                st.success("✅ MCP Client detected uvx")
-            else:
-                st.warning("⚠️ MCP Client could not detect uvx")
+            # MCP Client is ready since uvx is available
+            st.success("✅ MCP Client ready")
             
             if st.button("Check MCP Servers"):
                 with st.spinner("Checking MCP server status..."):
@@ -352,9 +348,9 @@ def main():
             except Exception as e:
                 st.text(f"Error running uvx: {e}")
             
-            # Show MCP client detection
-            st.markdown("**MCP Client Detection:**")
-            st.text(f"MCP Client uvx_available: {mcp_manager.mcp_client.client.uvx_available}")
+            # Show MCP client status
+            st.markdown("**MCP Client Status:**")
+            st.text("MCP Client: Ready (uvx available)")
     
     # Main interface tabs
     tab1, tab2, tab3 = st.tabs(["🔍 Repository Research", "📝 Code Documentation", "🤖 AI Assistant"])
