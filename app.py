@@ -27,8 +27,8 @@ class MCPServerManager:
         from config import Config
         
         self.mcp_client = SyncMCPClient()
-        self.git_repo_server = "git-repo-research"
-        self.code_doc_server = "code-doc-gen"
+        self.git_repo_server = "awslabs.git-repo-research-mcp-server"
+        self.code_doc_server = "awslabs.code-doc-gen-mcp-server"
         
         # Initialize MCP servers
         self._initialize_servers()
@@ -78,17 +78,36 @@ class MCPServerManager:
                 return {"status": "error", "message": "Git repository research server not available"}
             
             # Call the actual MCP server with the GitHub repository URL
+            # Try different parameter formats that AWS MCP servers might expect
             arguments = {
                 "repository_url": repo_url,
-                "query": query,
-                "analysis_type": "comprehensive"
+                "search_query": query
             }
             
-            result = self.mcp_client.call_tool(
-                self.git_repo_server,
-                "analyze_repository",
-                arguments
-            )
+            # Try common tool names for git repository analysis
+            tool_names_to_try = [
+                "search_repository", 
+                "analyze_repository", 
+                "git_search",
+                "repository_search",
+                "search"
+            ]
+            
+            result = None
+            for tool_name in tool_names_to_try:
+                try:
+                    result = self.mcp_client.call_tool(
+                        self.git_repo_server,
+                        tool_name,
+                        arguments
+                    )
+                    if "error" not in result or result.get("error", {}).get("code") != -32601:  # Method not found
+                        break
+                except:
+                    continue
+            
+            if result is None:
+                result = {"error": "No compatible tool found on server"}
             
             if "error" in result:
                 return {"status": "error", "message": f"MCP server error: {result['error']}"}
@@ -107,15 +126,33 @@ class MCPServerManager:
             # Call the actual MCP server
             arguments = {
                 "code": code_content,
-                "documentation_type": doc_type,
-                "include_examples": True
+                "doc_type": doc_type
             }
             
-            result = self.mcp_client.call_tool(
-                self.code_doc_server,
+            # Try common tool names for code documentation
+            tool_names_to_try = [
                 "generate_documentation",
-                arguments
-            )
+                "document_code", 
+                "create_docs",
+                "generate_docs",
+                "analyze_code"
+            ]
+            
+            result = None
+            for tool_name in tool_names_to_try:
+                try:
+                    result = self.mcp_client.call_tool(
+                        self.code_doc_server,
+                        tool_name,
+                        arguments
+                    )
+                    if "error" not in result or result.get("error", {}).get("code") != -32601:  # Method not found
+                        break
+                except:
+                    continue
+            
+            if result is None:
+                result = {"error": "No compatible tool found on server"}
             
             if "error" in result:
                 return {"status": "error", "message": f"MCP server error: {result['error']}"}
@@ -351,6 +388,24 @@ def main():
             # Show MCP client status
             st.markdown("**MCP Client Status:**")
             st.text("MCP Client: Ready (uvx available)")
+            
+            # List available MCP tools
+            st.markdown("**Available MCP Tools:**")
+            if mcp_manager.git_server_available:
+                git_tools = mcp_manager.list_available_tools(mcp_manager.git_repo_server)
+                st.markdown(f"Git Repo Server Tools ({len(git_tools)}):")
+                for tool in git_tools:
+                    st.text(f"  - {tool.get('name', 'Unknown')}: {tool.get('description', 'No description')}")
+            else:
+                st.text("Git Repo Server: Not connected")
+                
+            if mcp_manager.doc_server_available:
+                doc_tools = mcp_manager.list_available_tools(mcp_manager.code_doc_server)
+                st.markdown(f"Code Doc Server Tools ({len(doc_tools)}):")
+                for tool in doc_tools:
+                    st.text(f"  - {tool.get('name', 'Unknown')}: {tool.get('description', 'No description')}")
+            else:
+                st.text("Code Doc Server: Not connected")
     
     # Main interface tabs
     tab1, tab2, tab3 = st.tabs(["🔍 Repository Research", "📝 Code Documentation", "🤖 AI Assistant"])
