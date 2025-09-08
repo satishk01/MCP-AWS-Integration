@@ -168,11 +168,29 @@ The application uses Amazon Nova Pro with the following parameters:
 
 **Important**: Nova Pro models require using inference profiles instead of direct model IDs. The application automatically detects and uses the appropriate inference profile.
 
+## 📋 Required Inputs Summary
+
+### Environment Variables (Recommended - set in .env file):
+- `AWS_REGION` - Your AWS region (default: us-east-1)
+- `AWS_PROFILE` - Your AWS profile (default: default)
+- `GITHUB_TOKEN` - Your GitHub personal access token (required for repo analysis)
+
+### UI Inputs (only if not set in environment):
+- **Repository Research**: GitHub repository URL + research query
+- **Code Documentation**: Code content + documentation type
+- **AI Assistant**: Chat prompts (no additional setup needed)
+
+### Optional UI Overrides:
+- AWS region and profile (if you want to override environment settings)
+- GitHub token (if you want to use a different token)
+
 ## 📖 Usage Guide
 
 ### 1. Repository Research
 
 **Purpose**: Analyze GitHub repositories for architecture, security, performance, and code quality insights.
+
+**Important**: This feature analyzes the GitHub repository you specify, not your local files or the application's directory.
 
 **Sample Prompts**:
 - "Analyze the architecture patterns in this React application"
@@ -183,10 +201,16 @@ The application uses Amazon Nova Pro with the following parameters:
 
 **Steps**:
 1. Navigate to the "Repository Research" tab
-2. Enter the GitHub repository URL
-3. Provide a specific research query
-4. Click "Analyze Repository"
-5. Review MCP server results and AI-enhanced insights
+2. Configure your GitHub token in the sidebar (required)
+3. Enter the GitHub repository URL (must start with https://github.com/)
+4. Provide a specific research query
+5. Click "Analyze Repository"
+6. Review MCP server results and AI-enhanced insights
+
+**Requirements**:
+- Valid GitHub personal access token
+- Public GitHub repository URL or private repo with token access
+- Internet connection for GitHub API access
 
 ### 2. Code Documentation
 
