@@ -20,155 +20,141 @@ st.set_page_config(
 )
 
 class MCPServerManager:
-    """Manages MCP server interactions"""
+    """Manages MCP server interactions with selective connection"""
     
     def __init__(self):
         from utils.mcp_client import SyncMCPClient
         from config import Config
         
         self.mcp_client = SyncMCPClient()
-        self.git_repo_server = "awslabs.git-repo-research-mcp-server"
-        self.code_doc_server = "awslabs.code-doc-gen-mcp-server"
         
-        # Initialize MCP servers
-        self._initialize_servers()
+        # Available MCP servers configuration - using correct server IDs
+        self.available_servers = {
+            "git-repo-research": {
+                "name": "Git Repository Research",
+                "server_id": "git-repo-research",  # Simplified server ID
+                "package": "awslabs.git-repo-research-mcp-server@latest",
+                "description": "Analyze GitHub repositories, search code, and extract insights",
+                "env": {
+                    "AWS_PROFILE": os.getenv('AWS_PROFILE', 'default'),
+                    "AWS_REGION": os.getenv('AWS_REGION', 'us-east-1'),
+                    "FASTMCP_LOG_LEVEL": "ERROR",
+                    "GITHUB_TOKEN": os.getenv('GITHUB_TOKEN', '')
+                }
+            },
+            "aws-docs": {
+                "name": "AWS Documentation",
+                "server_id": "aws-docs",  # Simplified server ID
+                "package": "awslabs.aws-documentation-mcp-server@latest",
+                "description": "Search and retrieve AWS documentation",
+                "env": {
+                    "FASTMCP_LOG_LEVEL": "ERROR"
+                }
+            }
+        }
+        
+        # Track connected servers
+        self.connected_servers = {}
+        self.server_tools = {}
     
-    def _initialize_servers(self):
-        """Initialize MCP server connections"""
-        self.git_server_available = False
-        self.doc_server_available = False
+    def connect_server(self, server_key: str) -> bool:
+        """Connect to a specific MCP server"""
+        if server_key not in self.available_servers:
+            return False
+            
+        server_config = self.available_servers[server_key]
         
         try:
-            # Connect to Git Repo Research server
-            git_env = {
-                "AWS_PROFILE": os.getenv('AWS_PROFILE', 'default'),
-                "AWS_REGION": os.getenv('AWS_REGION', 'us-east-1'),
-                "FASTMCP_LOG_LEVEL": "ERROR",
-                "GITHUB_TOKEN": os.getenv('GITHUB_TOKEN', '')
-            }
-            
-            self.git_server_available = self.mcp_client.connect_server(
-                self.git_repo_server,
+            success = self.mcp_client.connect_server(
+                server_config["server_id"],
                 "uvx",
-                ["awslabs.git-repo-research-mcp-server@latest"],
-                git_env
+                [server_config["package"]],
+                server_config["env"]
             )
             
-            # Connect to Code Doc Gen server
-            doc_env = {
-                "FASTMCP_LOG_LEVEL": "ERROR"
-            }
-            
-            self.doc_server_available = self.mcp_client.connect_server(
-                self.code_doc_server,
-                "uvx", 
-                ["awslabs.code-doc-gen-mcp-server@latest"],
-                doc_env
-            )
+            if success:
+                self.connected_servers[server_key] = server_config
+                # Get available tools for this server
+                tools = self.mcp_client.list_tools(server_config["server_id"])
+                self.server_tools[server_key] = tools
+                return True
+            return False
             
         except Exception as e:
-            print(f"Failed to initialize MCP servers: {e}")
+            st.error(f"Failed to connect to {server_config['name']}: {e}")
+            return False
+    
+    def disconnect_server(self, server_key: str):
+        """Disconnect from a specific MCP server"""
+        if server_key in self.connected_servers:
+            server_config = self.connected_servers[server_key]
+            self.mcp_client.disconnect_server(server_config["server_id"])
+            del self.connected_servers[server_key]
+            if server_key in self.server_tools:
+                del self.server_tools[server_key]
+    
+    def is_server_connected(self, server_key: str) -> bool:
+        """Check if a server is connected"""
+        return server_key in self.connected_servers
+    
+    def get_server_tools(self, server_key: str) -> List[Dict[str, Any]]:
+        """Get available tools for a server"""
+        return self.server_tools.get(server_key, [])
+    
+    def call_server_tool(self, server_key: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Call a tool on a specific server with better error handling"""
+        if server_key not in self.connected_servers:
+            return {"status": "error", "message": f"Server {server_key} not connected"}
+        
+        server_config = self.connected_servers[server_key]
+        
+        try:
+            # Clean up arguments - remove empty values
+            clean_args = {k: v for k, v in arguments.items() if v is not None and v != ""}
+            
+            result = self.mcp_client.call_tool(
+                server_config["server_id"],
+                tool_name,
+                clean_args
+            )
+            
+            if "error" in result:
+                # Provide more detailed error information
+                error_info = result["error"]
+                if isinstance(error_info, dict):
+                    error_msg = f"Code: {error_info.get('code', 'Unknown')}, Message: {error_info.get('message', 'Unknown error')}"
+                    if error_info.get('data'):
+                        error_msg += f", Data: {error_info.get('data')}"
+                else:
+                    error_msg = str(error_info)
+                
+                return {
+                    "status": "error", 
+                    "message": error_msg,
+                    "debug_info": {
+                        "tool_name": tool_name,
+                        "arguments_sent": clean_args,
+                        "server_id": server_config["server_id"],
+                        "raw_error": result["error"]
+                    }
+                }
+            else:
+                return {"status": "success", "result": result}
+                
+        except Exception as e:
+            return {
+                "status": "error", 
+                "message": f"Failed to call tool: {str(e)}",
+                "debug_info": {
+                    "tool_name": tool_name,
+                    "arguments_sent": arguments,
+                    "server_id": server_config["server_id"]
+                }
+            }
     
 
     
-    def call_git_repo_research(self, repo_url: str, query: str) -> Dict[str, Any]:
-        """Call the git repo research MCP server"""
-        try:
-            if not self.git_server_available:
-                return {"status": "error", "message": "Git repository research server not available"}
-            
-            # Call the actual MCP server with the GitHub repository URL
-            # Try different parameter formats that AWS MCP servers might expect
-            arguments = {
-                "repository_url": repo_url,
-                "search_query": query
-            }
-            
-            # Try common tool names for git repository analysis
-            tool_names_to_try = [
-                "search_repository", 
-                "analyze_repository", 
-                "git_search",
-                "repository_search",
-                "search"
-            ]
-            
-            result = None
-            for tool_name in tool_names_to_try:
-                try:
-                    result = self.mcp_client.call_tool(
-                        self.git_repo_server,
-                        tool_name,
-                        arguments
-                    )
-                    if "error" not in result or result.get("error", {}).get("code") != -32601:  # Method not found
-                        break
-                except:
-                    continue
-            
-            if result is None:
-                result = {"error": "No compatible tool found on server"}
-            
-            if "error" in result:
-                return {"status": "error", "message": f"MCP server error: {result['error']}"}
-            else:
-                return {"status": "success", "analysis": result}
-                
-        except Exception as e:
-            return {"status": "error", "message": f"Failed to call MCP server: {str(e)}"}
-    
-    def call_code_doc_gen(self, code_content: str, doc_type: str = "api") -> Dict[str, Any]:
-        """Call the code documentation generation MCP server"""
-        try:
-            if not self.doc_server_available:
-                return {"status": "error", "message": "Code documentation server not available"}
-            
-            # Call the actual MCP server
-            arguments = {
-                "code": code_content,
-                "doc_type": doc_type
-            }
-            
-            # Try common tool names for code documentation
-            tool_names_to_try = [
-                "generate_documentation",
-                "document_code", 
-                "create_docs",
-                "generate_docs",
-                "analyze_code"
-            ]
-            
-            result = None
-            for tool_name in tool_names_to_try:
-                try:
-                    result = self.mcp_client.call_tool(
-                        self.code_doc_server,
-                        tool_name,
-                        arguments
-                    )
-                    if "error" not in result or result.get("error", {}).get("code") != -32601:  # Method not found
-                        break
-                except:
-                    continue
-            
-            if result is None:
-                result = {"error": "No compatible tool found on server"}
-            
-            if "error" in result:
-                return {"status": "error", "message": f"MCP server error: {result['error']}"}
-            else:
-                return {"status": "success", "documentation": result}
-                
-        except Exception as e:
-            return {"status": "error", "message": f"Failed to call MCP server: {str(e)}"}
-    
-    def list_available_tools(self, server_name: str) -> List[Dict[str, Any]]:
-        """List available tools for a server"""
-        try:
-            return self.mcp_client.list_tools(server_name)
-        except Exception as e:
-            st.error(f"Error listing tools for {server_name}: {e}")
-            return []
+
 
 class NovaProIntegration:
     """Handles Amazon Nova Pro model integration using Strands SDK"""
@@ -191,41 +177,324 @@ def main():
     st.title("🔬 AWS MCP Research & Documentation Assistant")
     st.markdown("Powered by Amazon Nova Pro and AWS Lab MCP Servers")
     
-    # Show configuration status at the top
-    with st.expander("📋 Configuration Status", expanded=False):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("**AWS Settings**")
-            if os.getenv('AWS_REGION'):
-                st.success(f"Region: {os.getenv('AWS_REGION')}")
-            else:
-                st.error("Region: Not set")
-                
-            if os.getenv('AWS_PROFILE'):
-                st.success(f"Profile: {os.getenv('AWS_PROFILE')}")
-            else:
-                st.error("Profile: Not set")
-        
-        with col2:
-            st.markdown("**GitHub Settings**")
-            if os.getenv('GITHUB_TOKEN'):
-                st.success("Token: ✅ Configured")
-            else:
-                st.error("Token: ❌ Missing")
-        
-        with col3:
-            st.markdown("**Required Inputs**")
-            st.info("Repository Research:")
-            st.write("• GitHub Repository URL")
-            st.write("• Research Query")
-            st.info("Code Documentation:")
-            st.write("• Code to document")
-            st.write("• Documentation type")
-    
     # Initialize components
-    mcp_manager = MCPServerManager()
-    nova_integration = NovaProIntegration()
+    if 'mcp_manager' not in st.session_state:
+        st.session_state.mcp_manager = MCPServerManager()
+    if 'nova_integration' not in st.session_state:
+        st.session_state.nova_integration = NovaProIntegration()
+    
+    mcp_manager = st.session_state.mcp_manager
+    nova_integration = st.session_state.nova_integration
+    
+    # Server Selection Interface
+    st.header("🔧 MCP Server Management")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Available MCP Servers")
+        
+        for server_key, server_info in mcp_manager.available_servers.items():
+            with st.container():
+                col_info, col_status, col_action = st.columns([3, 1, 1])
+                
+                with col_info:
+                    st.markdown(f"**{server_info['name']}**")
+                    st.caption(server_info['description'])
+                
+                with col_status:
+                    if mcp_manager.is_server_connected(server_key):
+                        st.success("Connected")
+                    else:
+                        st.error("Disconnected")
+                
+                with col_action:
+                    if mcp_manager.is_server_connected(server_key):
+                        if st.button(f"Disconnect", key=f"disconnect_{server_key}"):
+                            mcp_manager.disconnect_server(server_key)
+                            st.rerun()
+                    else:
+                        if st.button(f"Connect", key=f"connect_{server_key}"):
+                            with st.spinner(f"Connecting to {server_info['name']}..."):
+                                success = mcp_manager.connect_server(server_key)
+                                if success:
+                                    st.success(f"Connected to {server_info['name']}")
+                                else:
+                                    st.error(f"Failed to connect to {server_info['name']}")
+                            st.rerun()
+                
+                st.divider()
+    
+    with col2:
+        st.subheader("Connection Status")
+        connected_count = len(mcp_manager.connected_servers)
+        total_count = len(mcp_manager.available_servers)
+        
+        st.metric("Connected Servers", f"{connected_count}/{total_count}")
+        
+        if connected_count > 0:
+            st.success("Ready to use MCP tools")
+        else:
+            st.warning("No servers connected")
+    
+    # Show available tools for connected servers
+    if mcp_manager.connected_servers:
+        st.header("🛠️ Available Tools")
+        
+        for server_key in mcp_manager.connected_servers:
+            server_info = mcp_manager.available_servers[server_key]
+            tools = mcp_manager.get_server_tools(server_key)
+            
+            with st.expander(f"{server_info['name']} - {len(tools)} tools"):
+                if tools:
+                    for tool in tools:
+                        st.markdown(f"**{tool.get('name', 'Unknown')}**")
+                        if 'description' in tool:
+                            st.caption(tool['description'])
+                        if 'inputSchema' in tool:
+                            st.json(tool['inputSchema'])
+                        st.divider()
+                else:
+                    st.info("No tools available or failed to retrieve tools")
+    
+    # Quick Test Section
+    if mcp_manager.connected_servers:
+        with st.expander("🧪 Quick Test Tools", expanded=False):
+            st.markdown("Test common MCP operations with simplified interfaces")
+            
+            # Git Repository Test
+            if "git-repo-research" in mcp_manager.connected_servers:
+                st.subheader("Git Repository Quick Test")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    test_repo = st.text_input("Repository URL:", 
+                                            value="https://github.com/octocat/Hello-World",
+                                            key="test_repo")
+                with col2:
+                    test_query = st.text_input("Search Query:", 
+                                             value="README",
+                                             key="test_query")
+                
+                if st.button("Test Git Search", key="test_git"):
+                    # Try different parameter combinations
+                    param_combinations = [
+                        {"query": test_query, "repository_url": test_repo},
+                        {"search_query": test_query, "repo_url": test_repo},
+                        {"q": test_query, "url": test_repo},
+                        {"query": test_query, "url": test_repo},
+                        {"repository": test_repo, "query": test_query}
+                    ]
+                    
+                    tools = mcp_manager.get_server_tools("git-repo-research")
+                    if tools:
+                        tool_names = [tool.get('name', '') for tool in tools]
+                        st.write(f"Available tools: {', '.join(tool_names)}")
+                        
+                        # Try first available tool with different parameter combinations
+                        if tool_names:
+                            first_tool = tool_names[0]
+                            st.write(f"Testing tool: {first_tool}")
+                            
+                            for i, params in enumerate(param_combinations):
+                                with st.spinner(f"Trying parameter combination {i+1}..."):
+                                    result = mcp_manager.call_server_tool("git-repo-research", first_tool, params)
+                                    
+                                    if result['status'] == 'success':
+                                        st.success(f"✅ Success with parameters: {params}")
+                                        st.json(result['result'])
+                                        break
+                                    else:
+                                        st.warning(f"❌ Failed with parameters: {params}")
+                                        st.caption(f"Error: {result['message']}")
+                    else:
+                        st.error("No tools available for git-repo-research server")
+            
+            # AWS Docs Test
+            if "aws-docs" in mcp_manager.connected_servers:
+                st.subheader("AWS Documentation Quick Test")
+                
+                test_aws_query = st.text_input("AWS Documentation Query:", 
+                                             value="EC2 instances",
+                                             key="test_aws_query")
+                
+                if st.button("Test AWS Docs Search", key="test_aws"):
+                    tools = mcp_manager.get_server_tools("aws-docs")
+                    if tools:
+                        tool_names = [tool.get('name', '') for tool in tools]
+                        st.write(f"Available tools: {', '.join(tool_names)}")
+                        
+                        if tool_names:
+                            first_tool = tool_names[0]
+                            params = {"query": test_aws_query}
+                            
+                            result = mcp_manager.call_server_tool("aws-docs", first_tool, params)
+                            
+                            if result['status'] == 'success':
+                                st.success("✅ AWS Docs search successful!")
+                                st.json(result['result'])
+                            else:
+                                st.error(f"❌ AWS Docs search failed: {result['message']}")
+                    else:
+                        st.error("No tools available for aws-docs server")
+    
+    # Dynamic interface based on connected servers
+    if mcp_manager.connected_servers:
+        st.header("🚀 MCP Tools Interface")
+        
+        # Create tabs based on connected servers
+        tab_names = []
+        tab_keys = []
+        
+        for server_key in mcp_manager.connected_servers:
+            server_info = mcp_manager.available_servers[server_key]
+            tab_names.append(f"{server_info['name']}")
+            tab_keys.append(server_key)
+        
+        # Add AI Assistant tab
+        tab_names.append("🤖 AI Assistant")
+        tab_keys.append("ai_assistant")
+        
+        tabs = st.tabs(tab_names)
+        
+        for i, (tab, server_key) in enumerate(zip(tabs, tab_keys)):
+            with tab:
+                if server_key == "ai_assistant":
+                    # AI Assistant tab
+                    st.header("AI Assistant (Nova Pro)")
+                    st.markdown("Chat with Amazon Nova Pro for general assistance")
+                    
+                    user_input = st.text_area("Ask Nova Pro anything:", height=100)
+                    
+                    if st.button("Send to Nova Pro"):
+                        if user_input:
+                            with st.spinner("Generating response..."):
+                                response = nova_integration.generate_response(user_input)
+                                st.markdown("**Nova Pro Response:**")
+                                st.markdown(response)
+                        else:
+                            st.warning("Please enter a question")
+                
+                elif server_key in mcp_manager.connected_servers:
+                    # MCP Server specific interface
+                    server_info = mcp_manager.available_servers[server_key]
+                    tools = mcp_manager.get_server_tools(server_key)
+                    
+                    st.header(f"{server_info['name']}")
+                    st.markdown(server_info['description'])
+                    
+                    if tools:
+                        # Tool selection
+                        tool_names = [tool.get('name', 'Unknown') for tool in tools]
+                        selected_tool = st.selectbox("Select Tool:", tool_names, key=f"tool_{server_key}")
+                        
+                        if selected_tool:
+                            # Find the selected tool
+                            tool_info = next((tool for tool in tools if tool.get('name') == selected_tool), None)
+                            
+                            if tool_info:
+                                st.markdown(f"**Tool:** {selected_tool}")
+                                if 'description' in tool_info:
+                                    st.markdown(f"**Description:** {tool_info['description']}")
+                                
+                                # Dynamic parameter input based on tool schema
+                                st.subheader("Parameters")
+                                
+                                parameters = {}
+                                if 'inputSchema' in tool_info and 'properties' in tool_info['inputSchema']:
+                                    for param_name, param_info in tool_info['inputSchema']['properties'].items():
+                                        param_type = param_info.get('type', 'string')
+                                        param_desc = param_info.get('description', '')
+                                        
+                                        if param_type == 'string':
+                                            if 'url' in param_name.lower() or 'repository' in param_name.lower():
+                                                parameters[param_name] = st.text_input(
+                                                    f"{param_name}:", 
+                                                    help=param_desc,
+                                                    placeholder="https://github.com/user/repo",
+                                                    key=f"{server_key}_{selected_tool}_{param_name}"
+                                                )
+                                            else:
+                                                parameters[param_name] = st.text_area(
+                                                    f"{param_name}:", 
+                                                    help=param_desc,
+                                                    key=f"{server_key}_{selected_tool}_{param_name}"
+                                                )
+                                        elif param_type == 'boolean':
+                                            parameters[param_name] = st.checkbox(
+                                                f"{param_name}", 
+                                                help=param_desc,
+                                                key=f"{server_key}_{selected_tool}_{param_name}"
+                                            )
+                                        elif param_type == 'number' or param_type == 'integer':
+                                            parameters[param_name] = st.number_input(
+                                                f"{param_name}:", 
+                                                help=param_desc,
+                                                key=f"{server_key}_{selected_tool}_{param_name}"
+                                            )
+                                else:
+                                    # Fallback for tools without schema
+                                    st.info("No parameter schema available. Using generic inputs:")
+                                    parameters['input'] = st.text_area("Input:", key=f"{server_key}_{selected_tool}_input")
+                                
+                                # Execute tool
+                                if st.button(f"Execute {selected_tool}", key=f"execute_{server_key}_{selected_tool}"):
+                                    # Filter out empty parameters
+                                    filtered_params = {k: v for k, v in parameters.items() if v}
+                                    
+                                    if filtered_params:
+                                        with st.spinner(f"Executing {selected_tool}..."):
+                                            result = mcp_manager.call_server_tool(server_key, selected_tool, filtered_params)
+                                            
+                                            if result['status'] == 'success':
+                                                st.success("Tool executed successfully!")
+                                                
+                                                # Display results
+                                                st.subheader("Results")
+                                                st.json(result['result'])
+                                                
+                                                # Enhanced AI analysis
+                                                if st.button("Enhance with Nova Pro", key=f"enhance_{server_key}_{selected_tool}"):
+                                                    context = f"MCP Tool: {selected_tool}\nParameters: {filtered_params}\nResults: {json.dumps(result['result'], indent=2)}"
+                                                    ai_prompt = f"Analyze and explain these results from the {selected_tool} tool. Provide insights, summaries, and actionable recommendations."
+                                                    
+                                                    with st.spinner("Generating AI insights..."):
+                                                        ai_response = nova_integration.generate_response(ai_prompt, context)
+                                                        st.subheader("AI Insights (Nova Pro)")
+                                                        st.markdown(ai_response)
+                                            else:
+                                                st.error(f"Tool execution failed: {result['message']}")
+                                                
+                                                # Show debug information for troubleshooting
+                                                if 'debug_info' in result:
+                                                    with st.expander("🔍 Debug Information"):
+                                                        st.markdown("**Tool Details:**")
+                                                        st.json(result['debug_info'])
+                                                        
+                                                        st.markdown("**Troubleshooting Tips:**")
+                                                        if "Invalid request parameters" in result['message']:
+                                                            st.markdown("- Check if parameter names match the tool's expected schema")
+                                                            st.markdown("- Verify parameter types (string, number, boolean)")
+                                                            st.markdown("- Ensure required parameters are provided")
+                                                        elif "Method not found" in result['message']:
+                                                            st.markdown("- The tool name might be incorrect")
+                                                            st.markdown("- Check available tools list for correct names")
+                                                        
+                                                        # Show available tools for reference
+                                                        available_tools = mcp_manager.get_server_tools(server_key)
+                                                        if available_tools:
+                                                            st.markdown("**Available Tools on this server:**")
+                                                            for tool in available_tools:
+                                                                st.text(f"- {tool.get('name', 'Unknown')}")
+                                                
+                                                # Suggest trying with different parameters
+                                                st.info("💡 Try adjusting the parameters or check the tool schema above")
+                                    else:
+                                        st.warning("Please provide at least one parameter")
+                    else:
+                        st.warning("No tools available for this server")
+    else:
+        st.info("👆 Connect to one or more MCP servers above to start using tools")
     
     # Sidebar for configuration
     with st.sidebar:
