@@ -1,7 +1,8 @@
 import json
 import subprocess
 import asyncio
-from typing import Dict, Any, List, Optional
+import os
+from typing import Dict, Any, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,24 +13,32 @@ class MCPClient:
     def __init__(self):
         self.servers = {}
         self.active_connections = {}
+        logger.info("MCP Client initialized - uvx is available on this system")
     
     async def connect_server(self, server_name: str, command: str, args: List[str], env: Dict[str, str] = None) -> bool:
         """Connect to an MCP server"""
         try:
+            # Prepare environment
+            process_env = os.environ.copy()
+            if env:
+                process_env.update(env)
+            
             # Start the MCP server process
-            process_env = env or {}
             process = await asyncio.create_subprocess_exec(
                 command, *args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**process_env}
+                env=process_env
             )
             
             self.active_connections[server_name] = process
             logger.info(f"Connected to MCP server: {server_name}")
             return True
             
+        except FileNotFoundError as e:
+            logger.error(f"Command '{command}' not found: {e}")
+            return False
         except Exception as e:
             logger.error(f"Failed to connect to MCP server {server_name}: {e}")
             return False

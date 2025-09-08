@@ -35,6 +35,9 @@ class MCPServerManager:
     
     def _initialize_servers(self):
         """Initialize MCP server connections"""
+        self.git_server_available = False
+        self.doc_server_available = False
+        
         try:
             # Connect to Git Repo Research server
             git_env = {
@@ -44,7 +47,7 @@ class MCPServerManager:
                 "GITHUB_TOKEN": os.getenv('GITHUB_TOKEN', '')
             }
             
-            self.mcp_client.connect_server(
+            self.git_server_available = self.mcp_client.connect_server(
                 self.git_repo_server,
                 "uvx",
                 ["awslabs.git-repo-research-mcp-server@latest"],
@@ -56,7 +59,7 @@ class MCPServerManager:
                 "FASTMCP_LOG_LEVEL": "ERROR"
             }
             
-            self.mcp_client.connect_server(
+            self.doc_server_available = self.mcp_client.connect_server(
                 self.code_doc_server,
                 "uvx", 
                 ["awslabs.code-doc-gen-mcp-server@latest"],
@@ -64,11 +67,16 @@ class MCPServerManager:
             )
             
         except Exception as e:
-            st.error(f"Failed to initialize MCP servers: {e}")
+            print(f"Failed to initialize MCP servers: {e}")
+    
+
     
     def call_git_repo_research(self, repo_url: str, query: str) -> Dict[str, Any]:
         """Call the git repo research MCP server"""
         try:
+            if not self.git_server_available:
+                return {"status": "error", "message": "Git repository research server not available"}
+            
             # Call the actual MCP server with the GitHub repository URL
             arguments = {
                 "repository_url": repo_url,
@@ -83,16 +91,19 @@ class MCPServerManager:
             )
             
             if "error" in result:
-                return {"status": "error", "message": result["error"]}
+                return {"status": "error", "message": f"MCP server error: {result['error']}"}
             else:
                 return {"status": "success", "analysis": result}
                 
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            return {"status": "error", "message": f"Failed to call MCP server: {str(e)}"}
     
     def call_code_doc_gen(self, code_content: str, doc_type: str = "api") -> Dict[str, Any]:
         """Call the code documentation generation MCP server"""
         try:
+            if not self.doc_server_available:
+                return {"status": "error", "message": "Code documentation server not available"}
+            
             # Call the actual MCP server
             arguments = {
                 "code": code_content,
@@ -107,12 +118,12 @@ class MCPServerManager:
             )
             
             if "error" in result:
-                return {"status": "error", "message": result["error"]}
+                return {"status": "error", "message": f"MCP server error: {result['error']}"}
             else:
                 return {"status": "success", "documentation": result}
                 
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            return {"status": "error", "message": f"Failed to call MCP server: {str(e)}"}
     
     def list_available_tools(self, server_name: str) -> List[Dict[str, Any]]:
         """List available tools for a server"""
@@ -245,26 +256,105 @@ def main():
                 st.json(debug_info)
         
         # MCP Server Status
-        if st.button("Check MCP Servers"):
-            with st.spinner("Checking MCP server status..."):
-                git_tools = mcp_manager.list_available_tools(mcp_manager.git_repo_server)
-                doc_tools = mcp_manager.list_available_tools(mcp_manager.code_doc_server)
-                
-                if git_tools:
-                    st.success("✅ Git Repo Research Server")
-                    with st.expander("Available Git Tools"):
-                        for tool in git_tools:
-                            st.write(f"- {tool.get('name', 'Unknown')}")
-                else:
-                    st.warning("⚠️ Git Repo Research Server - No tools found")
-                
-                if doc_tools:
-                    st.success("✅ Code Doc Gen Server")
-                    with st.expander("Available Doc Tools"):
-                        for tool in doc_tools:
-                            st.write(f"- {tool.get('name', 'Unknown')}")
-                else:
-                    st.warning("⚠️ Code Doc Gen Server - No tools found")
+        st.markdown("**MCP Server Status**")
+        
+        # Check uvx availability with detailed info and EC2 specific paths
+        uvx_available = shutil.which('uvx') is not None
+        uvx_path = shutil.which('uvx')
+        
+        # Check EC2 specific paths if not found in PATH
+        if not uvx_available:
+            ec2_paths = [
+                "/home/ec2-user/.cargo/bin/uvx",
+                os.path.expanduser("~/.cargo/bin/uvx"),
+                "/root/.cargo/bin/uvx"
+            ]
+            for path in ec2_paths:
+                if os.path.exists(path) and os.access(path, os.X_OK):
+                    uvx_available = True
+                    uvx_path = path
+                    # Add to PATH for this session
+                    bin_dir = os.path.dirname(path)
+                    current_path = os.environ.get('PATH', '')
+                    if bin_dir not in current_path:
+                        os.environ['PATH'] = f"{bin_dir}:{current_path}"
+                        st.info(f"Added {bin_dir} to PATH")
+                    break
+        
+        # Get detailed uvx info
+        uvx_info = {"available": uvx_available, "path": uvx_path, "version": None}
+        
+        if uvx_available and uvx_path:
+            try:
+                result = subprocess.run([uvx_path, '--version'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    uvx_info["version"] = result.stdout.strip()
+            except Exception as e:
+                st.warning(f"uvx found but version check failed: {e}")
+        
+        if uvx_available:
+            st.success(f"✅ uvx is installed")
+            if uvx_info["version"]:
+                st.info(f"Version: {uvx_info['version']}")
+            if uvx_info["path"]:
+                st.info(f"Path: {uvx_info['path']}")
+            
+            # Show MCP client uvx detection status
+            mcp_uvx_status = mcp_manager.mcp_client.client.uvx_available
+            if mcp_uvx_status:
+                st.success("✅ MCP Client detected uvx")
+            else:
+                st.warning("⚠️ MCP Client could not detect uvx")
+            
+            if st.button("Check MCP Servers"):
+                with st.spinner("Checking MCP server status..."):
+                    if mcp_manager.git_server_available:
+                        st.success("✅ Git Repo Research Server")
+                    else:
+                        st.error("❌ Git Repo Research Server - Connection failed")
+                    
+                    if mcp_manager.doc_server_available:
+                        st.success("✅ Code Doc Gen Server")
+                    else:
+                        st.error("❌ Code Doc Gen Server - Connection failed")
+        else:
+            st.error("❌ MCP servers not available - check uvx installation and server configuration")
+        
+        # Debug information
+        if st.button("🔍 Debug uvx Detection"):
+            st.markdown("**Debug Information:**")
+            
+            # Show PATH
+            current_path = os.environ.get('PATH', '')
+            st.text(f"PATH: {current_path}")
+            
+            # Check common uvx locations
+            common_paths = [
+                os.path.expanduser("~/.cargo/bin/uvx"),
+                os.path.expanduser("~/.local/bin/uvx"),
+                "/usr/local/bin/uvx",
+                "/home/ec2-user/.cargo/bin/uvx"
+            ]
+            
+            st.markdown("**Checking common uvx locations:**")
+            for path in common_paths:
+                exists = os.path.exists(path)
+                executable = os.access(path, os.X_OK) if exists else False
+                st.text(f"{path}: {'✅' if exists else '❌'} exists, {'✅' if executable else '❌'} executable")
+            
+            # Test uvx command
+            st.markdown("**Testing uvx command:**")
+            try:
+                result = subprocess.run(['uvx', '--version'], capture_output=True, text=True, timeout=5)
+                st.text(f"Return code: {result.returncode}")
+                st.text(f"Stdout: {result.stdout}")
+                st.text(f"Stderr: {result.stderr}")
+            except Exception as e:
+                st.text(f"Error running uvx: {e}")
+            
+            # Show MCP client detection
+            st.markdown("**MCP Client Detection:**")
+            st.text(f"MCP Client uvx_available: {mcp_manager.mcp_client.client.uvx_available}")
     
     # Main interface tabs
     tab1, tab2, tab3 = st.tabs(["🔍 Repository Research", "📝 Code Documentation", "🤖 AI Assistant"])
